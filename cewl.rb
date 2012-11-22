@@ -1,4 +1,4 @@
-#!/usr/bin/env ruby
+#!/usr/bin/ruby1.8
 
 # == CeWL: Custom Word List Generator
 #
@@ -67,7 +67,7 @@ require 'getoptlong'
 require 'spider'
 require 'nokogiri'
 require 'http_configuration'
-require './cewl_lib'
+require '/usr/share/cewl/cewl_lib'
 
 # Doing this so I can override the allowed? fuction which normally checks
 # the robots.txt file
