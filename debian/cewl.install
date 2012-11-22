@@ -1,0 +1,3 @@
+debian/kali-cewl.desktop usr/share/applications/
+cewl_lib.rb usr/share/cewl/
+fab.rb usr/share/cewl/
