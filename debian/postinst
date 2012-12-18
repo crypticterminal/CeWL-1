@@ -1,7 +1,0 @@
-#!/bin/bash
-gem1.8 install http_configuration
-gem1.8 install mime-types
-gem1.8 install mini_exiftool
-gem1.8 install rubyzip
-gem1.8 install spider
-gem1.8 install nokogiri

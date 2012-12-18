@@ -10,7 +10,7 @@ Vcs-Browser: http://git.kali.org/gitweb/?p=packages/cewl.git;a=summary
 
 Package: cewl
 Architecture: all
-Depends: ${misc:Depends}, ruby1.8, rubygems, perl, libimage-exiftool-perl, libxml2-dev, libxslt-dev
+Depends: ${misc:Depends}, ruby1.8, rubygems, perl, libimage-exiftool-perl, ruby-http-configuration,ruby-mime-types,ruby-mini-exiftool,ruby-rubyzip,ruby-spider,ruby-nokogiri
 Description: Custom wordlist generator
  CeWL is a ruby app which spiders a given url to a specified 
  depth, optionally following external links, and returns a 
