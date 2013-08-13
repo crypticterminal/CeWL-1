@@ -12,6 +12,3 @@
 %:
 	dh $@ 
 
-override_dh_auto_install:
-	install cewl.rb $(CURDIR)/debian/cewl/usr/bin/cewl
-	dh_auto_install

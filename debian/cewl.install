@@ -1,2 +1,3 @@
-cewl_lib.rb usr/share/cewl/
-fab.rb usr/share/cewl/
+*.rb usr/share/cewl/
+README usr/share/cewl/
+debian/helper-script/* usr/bin/
