@@ -1,0 +1,15 @@
+Patched cewl_lib to properly require the gems it needs
+--- a/cewl_lib.rb
++++ b/cewl_lib.rb
+@@ -7,9 +7,9 @@
+ 
+ begin
+ 	require 'mini_exiftool'
+-	require "zip"
++	require "zip/zip"
+ 	require "rexml/document"
+-	require 'mime'
++	require 'mime/types'
+ 	include REXML
+ rescue LoadError => e
+ 	# catch error and prodive feedback on installing gem
