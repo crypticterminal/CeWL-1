@@ -1,8 +1,30 @@
-require 'mini_exiftool'
-require "zip/zip"
-require "rexml/document"
-require 'mime/types'
-include REXML
+# == CeWL Library: Library to outsource reusable features
+#
+# Author:: Robin Wood (robin@digininja.org)
+# Copyright:: Copyright (c) Robin Wood 2013
+# Licence:: GPL
+#
+
+begin
+	require 'mini_exiftool'
+	require "zip"
+	require "rexml/document"
+	require 'mime'
+	include REXML
+rescue LoadError => e
+	# catch error and prodive feedback on installing gem
+	if e.to_s =~ /cannot load such file -- (.*)/
+		missing_gem = $1
+		puts "\nError: #{missing_gem} gem not installed\n"
+		puts "\t use: \"gem install #{missing_gem}\" to install the required gem\n\n"
+		exit
+	else
+		puts "There was an error loading the gems:"
+		puts
+		puts e.to_s
+		exit
+	end
+end
 
 # Override the MiniExiftool class so that I can modify the parse_line
 # method and force all encoding to ISO-8859-1. Without this the app bombs
