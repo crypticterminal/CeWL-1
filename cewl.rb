@@ -62,20 +62,78 @@
 # Licence:: GPL
 #
 
-require "rubygems"
-require 'getoptlong'
-require 'spider'
-require 'nokogiri'
-require 'http_configuration'
+VERSION = "5.0"
+
+puts"CeWL #{VERSION} Robin Wood (robin@digininja.org) (www.digininja.org)"
+puts
+
+begin
+	require 'getoptlong'
+	require 'spider'
+	require 'nokogiri'
+	require 'net/http'
+rescue LoadError => e
+	# catch error and prodive feedback on installing gem
+	if e.to_s =~ /cannot load such file -- (.*)/
+		missing_gem = $1
+		puts "\nError: #{missing_gem} gem not installed\n"
+		puts "\t use: \"gem install #{missing_gem}\" to install the required gem\n\n"
+		exit
+	else
+		puts "There was an error loading the gems:"
+		puts
+		puts e.to_s
+		exit
+	end
+end
+
 require './cewl_lib'
 
 # Doing this so I can override the allowed? fuction which normally checks
 # the robots.txt file
 class MySpider<Spider
+	@@proxy_host = nil
+	@@proxy_port = nil
+	@@proxy_username = nil
+	@@proxy_password = nil
+
+	@@auth_type = nil
+	@@auth_user = nil
+	@@auth_password = nil
+	@@verbose = false
+
+	def self.proxy (host, port = nil, username = nil, password = nil)
+		@@proxy_host = host
+		port = 8080 if port.nil?
+		@@proxy_port = port
+		@@proxy_username = username
+		@@proxy_password = password
+	end
+
+	def self.auth_creds (type, user, password)
+		@@auth_type = type
+		@@auth_user = user
+		@@auth_password = password
+	end
+
+	def self.verbose (val)
+		@@verbose = val
+	end
+
 	# Create an instance of MySpiderInstance rather than SpiderInstance
 	def self.start_at(a_url, &block)
 		rules = RobotRules.new('Ruby Spider 1.0')
 		a_spider = MySpiderInstance.new({nil => a_url}, [], rules, [])
+		a_spider.auth_type = @@auth_type
+		a_spider.auth_user = @@auth_user
+		a_spider.auth_password = @@auth_password
+
+		a_spider.proxy_host = @@proxy_host
+		a_spider.proxy_port = @@proxy_port
+		a_spider.proxy_username = @@proxy_username
+		a_spider.proxy_password = @@proxy_password
+
+		a_spider.verbose = @@verbose
 		block.call(a_spider)
 		a_spider.start!
 	end
@@ -84,7 +142,19 @@ end
 # My version of the spider class which allows all files
 # to be processed
 class MySpiderInstance<SpiderInstance
+	attr_writer :auth_type
+	attr_writer :auth_user
+	attr_writer :auth_password
+
+	attr_writer :proxy_host
+	attr_writer :proxy_port
+	attr_writer :proxy_username
+	attr_writer :proxy_password
+
+	attr_writer :verbose
+
 	# Force all files to be allowed
+	# Normally the robots.txt file will be honoured
 	def allowed?(a_url, parsed_url)
 		true
 	end
@@ -122,28 +192,79 @@ class MySpiderInstance<SpiderInstance
 		end while !@next_urls.empty?
 	end
 
-  def get_page(parsed_url, &block) #:nodoc:
-    @seen << parsed_url
-    begin
-      http = Net::HTTP.new(parsed_url.host, parsed_url.port)
-      if parsed_url.scheme == 'https'
-        http.use_ssl = true
-        http.verify_mode = OpenSSL::SSL::VERIFY_NONE
-      end
-      # Uses start because http.finish cannot be called.
-      r = http.start {|h| h.request(Net::HTTP::Get.new(parsed_url.request_uri, @headers))}
-      if r.redirect?
-		base_url = parsed_url.to_s[0, parsed_url.to_s.rindex('/')]
-        new_url = URI.parse(construct_complete_url(base_url,r['Location']))
-		@next_urls.push parsed_url.to_s => new_url.to_s
-      else
-        block.call(r)
-      end
-    rescue Timeout::Error, Errno::EINVAL, Errno::ECONNRESET, EOFError => e
-      p e
-      nil
-    end
-  end
+	def get_page(uri, &block) #:nodoc:
+		@seen << uri
+		
+		begin
+			if @proxy_host.nil?
+				http = Net::HTTP.new(uri.host, uri.port)
+
+				if uri.scheme == 'https'
+					http.use_ssl = true
+					http.verify_mode = OpenSSL::SSL::VERIFY_NONE
+				end
+			else
+				proxy = Net::HTTP::Proxy(@proxy_host, @proxy_port, @proxy_username, @proxy_password)
+				begin
+					if uri.scheme == 'https'
+						http = proxy.start(uri.host, uri.port, :use_ssl => true, :verify_mode => OpenSSL::SSL::VERIFY_NONE)
+					else
+						http = proxy.start(uri.host, uri.port)
+					end
+				rescue => e
+					puts "Failed to connect to the proxy"
+					exit
+				end
+			end
+			
+			req = Net::HTTP::Get.new(uri.request_uri, @headers)
+			
+			if !@auth_type.nil?
+				case @auth_type
+					when "digest"
+						uri.user = @auth_user
+						uri.password = @auth_password
+
+						res = http.request req
+
+						if not res['www-authenticate'].nil?
+							digest_auth = Net::HTTP::DigestAuth.new
+							auth = digest_auth.auth_header uri, res['www-authenticate'], 'GET'
+
+							req = Net::HTTP::Get.new uri.request_uri
+							req.add_field 'Authorization', auth
+						end
+
+					when "basic"
+						req.basic_auth @auth_user, @auth_password
+				end
+			end
+			res = http.request(req)
+			
+			if res.redirect?
+				#puts "redirect url"
+				base_url = uri.to_s[0, uri.to_s.rindex('/')]
+				new_url = URI.parse(construct_complete_url(base_url,res['Location']))
+
+				# If auth is used then a name:pass@ gets added, this messes the tree
+				# up so easiest to just remove it
+				current_uri = uri.to_s.gsub(/:\/\/[^:]*:[^@]*@/, "://")
+				@next_urls.push current_uri => new_url.to_s
+			elsif res.code == "401"
+				puts "Authentication required, can't continue on this branch - #{uri}" if @verbose
+			else
+				block.call(res)
+			end
+		rescue  => e
+			puts "Unable to connect to the site, run in verbose mode for more information"
+			if @verbose
+				puts
+				puts"The following error may help:"
+				puts e.to_s
+			end
+			exit
+		end
+	end
 	# overriding so that I can get it to ingore direct names - i.e. #name
 	def construct_complete_url(base_url, additional_url, parsed_additional_url = nil) #:nodoc:
 		if additional_url =~ /^#/
@@ -332,14 +453,19 @@ opts = GetoptLong.new(
 	[ '--meta', "-a" , GetoptLong::NO_ARGUMENT ],
 	[ '--email', "-e" , GetoptLong::NO_ARGUMENT ],
 	[ '--count', '-c', GetoptLong::NO_ARGUMENT ],
-	[ "-v" , GetoptLong::NO_ARGUMENT ]
+	[ '--auth_user', GetoptLong::REQUIRED_ARGUMENT ],
+	[ '--auth_pass', GetoptLong::REQUIRED_ARGUMENT ],
+	[ '--auth_type', GetoptLong::REQUIRED_ARGUMENT ],
+	[ '--proxy_host', GetoptLong::REQUIRED_ARGUMENT ],
+	[ '--proxy_port', GetoptLong::REQUIRED_ARGUMENT ],
+	[ '--proxy_username', GetoptLong::REQUIRED_ARGUMENT ],
+	[ '--proxy_password', GetoptLong::REQUIRED_ARGUMENT ],
+	[ "--verbose", "-v" , GetoptLong::NO_ARGUMENT ]
 )
 
 # Display the usage
 def usage
-	puts"cewl 4.3 Robin Wood (robin@digininja.org) (www.digininja.org)
-
-Usage: cewl [OPTION] ... URL
+	puts "Usage: cewl [OPTION] ... URL
 	--help, -h: show help
 	--keep, -k: keep the downloaded file
 	--depth x, -d x: depth to spider to, default 2
@@ -354,7 +480,19 @@ Usage: cewl [OPTION] ... URL
 	--email_file file: output file for email addresses
 	--meta-temp-dir directory: the temporary directory used by exiftool when parsing files, default /tmp
 	--count, -c: show the count for each word found
-	-v: verbose
+
+	Authentication
+	--auth_type: digest or basic
+	--auth_user: authentication username
+	--auth_pass: authentication password
+	
+	Proxy Support
+	--proxy_host: proxy host
+	--proxy_port: proxy port, default 8080
+	--proxy_username: username for proxy, if required
+	--proxy_password: password for proxy, if required
+
+	--verbose, -v: verbose
 
 	URL: The site to spider.
 
@@ -377,6 +515,14 @@ wordlist=true
 meta_temp_dir="/tmp/"
 keep=false
 show_count = false
+auth_type = nil
+auth_user = nil
+auth_pass = nil
+
+proxy_host = nil
+proxy_port = nil
+proxy_username = nil
+proxy_password = nil
 
 begin
 	opts.each do |opt, arg|
@@ -424,14 +570,53 @@ begin
 			offsite=true
 		when '--ua'
 			ua=arg
-		when '-v'
+		when '--verbose'
 			verbose=true
 		when '--write'
 			outfile=arg
+		when "--proxy_password"
+			proxy_password = arg
+		when "--proxy_username"
+			proxy_username = arg
+		when "--proxy_host"
+			proxy_host = arg
+		when "--proxy_port"
+			proxy_port = arg.to_i
+		when "--auth_pass"
+			auth_pass = arg
+		when "--auth_user"
+			auth_user = arg
+		when "--auth_type"
+			if arg =~ /(digest|basic)/i
+				auth_type=$1.downcase
+				if auth_type == "digest"
+					begin
+						require "net/http/digest_auth"
+					rescue LoadError => e
+						# catch error and prodive feedback on installing gem
+						puts "\nError: To use digest auth you require the net-http-digest_auth gem, to install it use:\n\n"
+						puts "\t\"gem install net-http-digest_auth\"\n\n"
+						exit
+					end
+				end
+			else
+				puts "Invalid authentication type, please specify either basic or digest"
+				exit
+			end
 		end
 	end
 rescue
 	usage
+end
+
+if !auth_type.nil? and (auth_user.nil? or auth_pass.nil?)
+	puts "If using basic or digest auth you must provide a username and password\n\n"
+	exit
+end
+
+if auth_type.nil? and (!auth_user.nil? or !auth_pass.nil?)
+	puts "Authentication details provided but no mention of basic or digest"
+	exit
 end
 
 if ARGV.length != 1
@@ -493,74 +678,80 @@ else
 end
 
 begin
-	# If you want to use a proxy, uncomment the next 2 lines and the matching end near the bottom
-	#http_conf = Net::HTTP::Configuration.new(:proxy_host => '<Proxy server here>', :proxy_port => <Proxy port here>)
-	#http_conf.apply do
-		if verbose
-			puts "Starting at " + url
+	if verbose
+		puts "Starting at " + url
+	end
+
+	if !proxy_host.nil?
+		MySpider.proxy(proxy_host, proxy_port, proxy_username, proxy_password)
+	end
+
+	if !auth_type.nil?
+		MySpider.auth_creds(auth_type, auth_user, auth_pass)
+	end
+	MySpider.verbose(verbose)
+	
+	MySpider.start_at(url) do |s|
+		if ua!=nil
+			s.headers['User-Agent'] = ua
 		end
 
-		MySpider.start_at(url) do |s|
-			if ua!=nil
-				s.headers['User-Agent'] = ua
-			end
-
-			s.add_url_check do |a_url|
-				#puts "checking page " + a_url
-				allow=true
-				# Extensions to ignore
-				if a_url =~ /(\.zip$|\.gz$|\.zip$|\.bz2$|\.png$|\.gif$|\.jpg$|^#)/
-					if verbose
-						puts "Ignoring internal link or graphic: "+a_url
+		s.add_url_check do |a_url|
+			#puts "checking page " + a_url
+			allow=true
+			# Extensions to ignore
+			if a_url =~ /(\.zip$|\.gz$|\.zip$|\.bz2$|\.png$|\.gif$|\.jpg$|^#)/
+				if verbose
+					puts "Ignoring internal link or graphic: "+a_url
+				end
+				allow=false
+			else
+				if /^mailto:(.*)/i.match(a_url)
+					if email
+						email_arr<<$1
+						if verbose
+							puts "Found #{$1} on page #{a_url}"
+						end
 					end
 					allow=false
 				else
-					if /^mailto:(.*)/i.match(a_url)
-						if email
-							email_arr<<$1
-							if verbose
-								puts "Found #{$1} on page #{a_url}"
-							end
-						end
-						allow=false
-					else
-						if !offsite
-							a_url_parsed = URI.parse(a_url)
-							url_parsed = URI.parse(url)
+					if !offsite
+						a_url_parsed = URI.parse(a_url)
+						url_parsed = URI.parse(url)
 #							puts 'comparing ' + a_url + ' with ' + url
 
-							allow = (a_url_parsed.host == url_parsed.host)
+						allow = (a_url_parsed.host == url_parsed.host)
 
-							if !allow && verbose
-								puts "Offsite link, not following: "+a_url
-							end
+						if !allow && verbose
+							puts "Offsite link, not following: "+a_url
 						end
 					end
 				end
-				allow
 			end
+			allow
+		end
 
-			s.on :success do |a_url, resp, prior_url|
+		s.on :success do |a_url, resp, prior_url|
 
-				if verbose
-					if prior_url.nil?
-						puts "Visiting: #{a_url}, got response code #{resp.code}"
-					else
-						puts "Visiting: #{a_url} referred from #{prior_url}, got response code #{resp.code}"
-					end
+			if verbose
+				if prior_url.nil?
+					puts "Visiting: #{a_url}, got response code #{resp.code}"
+				else
+					puts "Visiting: #{a_url} referred from #{prior_url}, got response code #{resp.code}"
 				end
-				body=resp.body.to_s
+			end
+			body=resp.body.to_s
 
-				# get meta data
-				if /.*<meta.*description.*content\s*=[\s'"]*(.*)/i.match(body)
-					description=$1
-					body += description.gsub(/[>"\/']*/, "") 
-				end 
+			# get meta data
+			if /.*<meta.*description.*content\s*=[\s'"]*(.*)/i.match(body)
+				description=$1
+				body += description.gsub(/[>"\/']*/, "") 
+			end 
 
-				if /.*<meta.*keywords.*content\s*=[\s'"]*(.*)/i.match(body)
-					keywords=$1
-					body += keywords.gsub(/[>"\/']*/, "") 
-				end 
+			if /.*<meta.*keywords.*content\s*=[\s'"]*(.*)/i.match(body)
+				keywords=$1
+				body += keywords.gsub(/[>"\/']*/, "") 
+			end 
 
 #				puts body
 #				while /mailto:([^'">]*)/i.match(body)
@@ -570,136 +761,138 @@ begin
 #					end
 #				end 
 
-				while /(location.href\s*=\s*["']([^"']*)['"];)/i.match(body)
-					full_match = $1
-					j_url = $2
-					if verbose
-						puts "Javascript redirect found " + j_url
-					end
+			while /(location.href\s*=\s*["']([^"']*)['"];)/i.match(body)
+				full_match = $1
+				j_url = $2
+				if verbose
+					puts "Javascript redirect found " + j_url
+				end
 
-					re = Regexp.escape(full_match)
+				re = Regexp.escape(full_match)
 
-					body.gsub!(/#{re}/,"")
+				body.gsub!(/#{re}/,"")
 
-					if j_url !~ /https?:\/\//i
+				if j_url !~ /https?:\/\//i
 
 # Broken, needs real domain adding here
+# http://docs.seattlerb.org/net-http-digest_auth/Net/HTTP/DigestAuth.html
 
-						domain = "http://ninja.dev/"
-						j_url = domain + j_url
-						if verbose
-							puts "Relative URL found, adding domain to make " + j_url
-						end
+					domain = "http://ninja.dev/"
+					j_url = domain + j_url
+					if verbose
+						puts "Relative URL found, adding domain to make " + j_url
 					end
-
-					x = {a_url=>j_url}
-					url_stack.push x
 				end
 
-				# strip comment tags
-				body.gsub!(/<!--/, "")
-				body.gsub!(/-->/, "")
+				x = {a_url=>j_url}
+				url_stack.push x
+			end
 
-				# If you want to add more attribute names to include, just add them to this array
-				attribute_names = [
-									"alt",
-									"title",
-								]
+			# strip comment tags
+			body.gsub!(/<!--/, "")
+			body.gsub!(/-->/, "")
 
-				attribute_text = ""
+			# If you want to add more attribute names to include, just add them to this array
+			attribute_names = [
+								"alt",
+								"title",
+							]
 
-				attribute_names.each { |attribute_name|
-					body.gsub!(/#{attribute_name}="([^"]*)"/) { |attr| attribute_text += $1 + " " }
-				}
+			attribute_text = ""
 
-				if verbose
-					puts "Attribute text found:"
-					puts attribute_text
-					puts
-				end
+			attribute_names.each { |attribute_name|
+				body.gsub!(/#{attribute_name}="([^"]*)"/) { |attr| attribute_text += $1 + " " }
+			}
 
-				body += " " + attribute_text
+			if verbose
+				puts "Attribute text found:"
+				puts attribute_text
+				puts
+			end
 
-				# strip html tags
-				words=body.gsub(/<\/?[^>]*>/, "") 
+			body += " " + attribute_text
 
-				# check if this is needed
-				words.gsub!(/&[a-z]*;/, "") 
+			# strip html tags
+			words=body.gsub(/<\/?[^>]*>/, "") 
 
-				# may want 0-9 in here as well in the future but for now limit it to a-z so
-				# you can't sneak any nasty characters in
-				if /.*\.([a-z]+)(\?.*$|$)/i.match(a_url)
-					file_extension=$1
-				else
-					file_extension=""
-				end
+			# check if this is needed
+			words.gsub!(/&[a-z]*;/, "") 
 
-				if meta
-					begin
-						if keep and file_extension =~ /^((doc|dot|ppt|pot|xls|xlt|pps)[xm]?)|(ppam|xlsb|xlam|pdf|zip|gz|zip|bz2)$/
-							if /.*\/(.*)$/.match(a_url)
-								output_filename=meta_temp_dir+$1
-								if verbose
-									puts "Keeping " + output_filename
-								end
-							else
-								# shouldn't ever get here as the regex above should always be able to pull the filename out of the url, 
-								# but just in case
-								output_filename=meta_temp_dir+"cewl_tmp"
-								output_filename += "."+file_extension unless file_extension==""
+			# may want 0-9 in here as well in the future but for now limit it to a-z so
+			# you can't sneak any nasty characters in
+			if /.*\.([a-z]+)(\?.*$|$)/i.match(a_url)
+				file_extension=$1
+			else
+				file_extension=""
+			end
+
+			if meta
+				begin
+					if keep and file_extension =~ /^((doc|dot|ppt|pot|xls|xlt|pps)[xm]?)|(ppam|xlsb|xlam|pdf|zip|gz|zip|bz2)$/
+						if /.*\/(.*)$/.match(a_url)
+							output_filename=meta_temp_dir+$1
+							if verbose
+								puts "Keeping " + output_filename
 							end
 						else
+							# shouldn't ever get here as the regex above should always be able to pull the filename out of the url, 
+							# but just in case
 							output_filename=meta_temp_dir+"cewl_tmp"
 							output_filename += "."+file_extension unless file_extension==""
 						end
-						out=File.new(output_filename, "w")
-						out.print(resp.body)
-						out.close
-
-						meta_data=process_file(output_filename, verbose)
-						if(meta_data!=nil)
-							usernames+=meta_data
-						end
-					rescue => e
-						puts "Couldn't open the meta temp file for writing - " + e.inspect
-						exit
+					else
+						output_filename=meta_temp_dir+"cewl_tmp"
+						output_filename += "."+file_extension unless file_extension==""
 					end
+					out=File.new(output_filename, "w")
+					out.print(resp.body)
+					out.close
+
+					meta_data=process_file(output_filename, verbose)
+					if(meta_data!=nil)
+						usernames+=meta_data
+					end
+				rescue => e
+					puts "Couldn't open the meta temp file for writing - " + e.inspect
+					exit
 				end
+			end
 
-				# don't get words from these file types. Most will have been blocked by the url_check function but
-				# some are let through, such as .css, so that they can be checked for email addresses
+			# don't get words from these file types. Most will have been blocked by the url_check function but
+			# some are let through, such as .css, so that they can be checked for email addresses
 
-				# this is a bad way to do this but it is either white or black list extensions and 
-				# the list of either is quite long, may as well black list and let extra through
-				# that can then be weeded out later than stop things that could be useful
-				begin
-					if file_extension !~ /^((doc|dot|ppt|pot|xls|xlt|pps)[xm]?)|(ppam|xlsb|xlam|pdf|zip|gz|zip|bz2|css|png|gif|jpg|#)$/
-						begin
-							if email
-								# Split the file down based on the email address regexp
-								#words.gsub!(/\b([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,4})\b/i)
-								#p words
+			# this is a bad way to do this but it is either white or black list extensions and 
+			# the list of either is quite long, may as well black list and let extra through
+			# that can then be weeded out later than stop things that could be useful
+			begin
+				if file_extension !~ /^((doc|dot|ppt|pot|xls|xlt|pps)[xm]?)|(ppam|xlsb|xlam|pdf|zip|gz|zip|bz2|css|png|gif|jpg|#)$/
+					begin
+						if email
+							# Split the file down based on the email address regexp
+							#words.gsub!(/\b([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,4})\b/i)
+							#p words
 
-								# If you want to pull email addresses from the contents of files found, such as word docs then move
-								# this block outside the if statement
-								# I've put it in here as some docs contain email addresses that have nothing to do with the target
-								# so give false positive type results
-								words.each_line do |word|
-									while /\b([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,4})\b/i.match(word)
-										if verbose
-											puts "Found #{$1} on page #{a_url}"
-										end
-										email_arr<<$1
-										word=word.gsub(/#{$1}/, "")
+							# If you want to pull email addresses from the contents of files found, such as word docs then move
+							# this block outside the if statement
+							# I've put it in here as some docs contain email addresses that have nothing to do with the target
+							# so give false positive type results
+							words.each_line do |word|
+								while /\b([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,4})\b/i.match(word)
+									if verbose
+										puts "Found #{$1} on page #{a_url}"
 									end
+									email_arr<<$1
+									word=word.gsub(/#{$1}/, "")
 								end
 							end
-						rescue => e
-							puts "There was a problem generating the email list"
-							puts "Error: " + e.inspect
-							puts e.backtrace
 						end
-					
+					rescue => e
+						puts "There was a problem generating the email list"
+						puts "Error: " + e.inspect
+						puts e.backtrace
+					end
+				
+					if wordlist
 						# remove any symbols
 						words.gsub!(/[^a-z0-9]/i," ")
 						# add to the array
@@ -712,32 +905,47 @@ begin
 							end
 						end
 					end
-				rescue => e
-					puts "There was a problem handling word generation"
-					puts "Error: " + e.inspect
 				end
+			rescue => e
+				puts "There was a problem handling word generation"
+				puts "Error: " + e.inspect
 			end
-			s.store_next_urls_with url_stack
-
 		end
-	#end
+		s.store_next_urls_with url_stack
+
+	end
+rescue Errno::ENOENT
+	puts "Invalid URL specified"
+	puts
+	exit
 rescue => e
 	puts "Couldn't access the site"
+	puts
 	puts "Error: " + e.inspect
 	puts e.backtrace
 	exit
 end
 
-sorted_wordlist = word_hash.sort_by do |word, count| -count end
-sorted_wordlist.each do |word, count|
-	if show_count
-		outfile_file.puts word + ', ' + count.to_s
-	else
-		outfile_file.puts word
+#puts "end of main loop"
+
+if wordlist
+	puts "Words found\n\n" if verbose
+
+	sorted_wordlist = word_hash.sort_by do |word, count| -count end
+	sorted_wordlist.each do |word, count|
+		if show_count
+			outfile_file.puts word + ', ' + count.to_s
+		else
+			outfile_file.puts word
+		end
 	end
 end
 
+#puts "end of wordlist loop"
+
 if email
+	puts "Dumping email addresses to file" if verbose
+
 	email_arr.delete_if { |x| x.chomp==""}
 	email_arr.uniq!
 	email_arr.sort!
@@ -753,7 +961,10 @@ if email
 	end
 end
 
+#puts "end of email loop"
+
 if meta
+	puts "Dumping meta data to file" if verbose
 	usernames.delete_if { |x| x.chomp==""}
 	usernames.uniq!
 	usernames.sort!
@@ -768,6 +979,8 @@ if meta
 		meta_outfile_file.puts usernames.join("\n")
 	end
 end
+
+#puts "end of meta loop"
 
 if meta_outfile!=nil
 	meta_outfile_file.close
