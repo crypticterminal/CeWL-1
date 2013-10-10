@@ -1,3 +1,9 @@
+cewl (5.0-1kali1) kali; urgency=low
+
+  * Added libzip-ruby1.9.1 as an install depend
+
+ -- Devon Kearns <dookie@kali.org>  Thu, 10 Oct 2013 09:02:03 -0600
+
 cewl (5.0-1kali0) kali; urgency=low
 
   * Imported new upstream release (Closes: 0000490)
