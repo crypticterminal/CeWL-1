@@ -1,0 +1,13 @@
+Index: cewl/fab.rb
+===================================================================
+--- cewl.orig/fab.rb	2013-12-21 20:15:03.093936030 -0500
++++ cewl/fab.rb	2013-12-21 20:57:02.741877892 -0500
+@@ -29,7 +29,7 @@
+ 
+ require "rubygems"
+ require 'getoptlong'
+-require "./cewl_lib.rb"
++require File.dirname(__FILE__) + "/cewl_lib"
+ 
+ opts = GetoptLong.new(
+ 	[ '--help', '-h', GetoptLong::NO_ARGUMENT ],

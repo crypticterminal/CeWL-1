@@ -1,0 +1,3 @@
+#!/bin/bash
+
+ruby /usr/share/cewl/fab.rb "$@"
