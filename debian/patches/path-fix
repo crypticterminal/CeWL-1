@@ -1,0 +1,13 @@
+Index: cewl/cewl.rb
+===================================================================
+--- cewl.orig/cewl.rb	2013-12-21 20:15:03.093936030 -0500
++++ cewl/cewl.rb	2013-12-21 20:50:43.212562550 -0500
+@@ -87,7 +87,7 @@
+ 	end
+ end
+ 
+-require './cewl_lib'
++require File.dirname(__FILE__) + '/cewl_lib'
+ 
+ # Doing this so I can override the allowed? fuction which normally checks
+ # the robots.txt file
