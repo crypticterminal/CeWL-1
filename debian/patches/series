@@ -1,3 +1,4 @@
 fab-path-fix
 path-fix
 fix-gem-requires
+suppress-gem-warning

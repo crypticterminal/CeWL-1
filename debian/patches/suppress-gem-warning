@@ -1,0 +1,13 @@
+Patched to suppress the warning about the iconv gem usage
+Warning Message:
+/usr/lib/ruby/1.9.1/rubygems/custom_require.rb:36:in `require': iconv will be 
+deprecated in the future, use String#encode instead.
+--- a/cewl.rb
++++ b/cewl.rb
+@@ -1,5 +1,5 @@
+ #!/usr/bin/env ruby
+-
++$VERBOSE=nil
+ # == CeWL: Custom Word List Generator
+ #
+ # CeWL will spider a target site and generate up to three lists:
