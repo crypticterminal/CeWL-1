@@ -2,6 +2,7 @@ cewl (5.0-1kali6) kali-dev; urgency=medium
 
   * Amend vcs-git in debian/control 
   * Update dependencies: debhelper 9, ruby and ruby-zip
+  * Rename script fab in cewlfab
 
  -- Sophie Brun <sophie@freexian.com>  Tue, 05 Aug 2014 11:22:33 +0200
 
