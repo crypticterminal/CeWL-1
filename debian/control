@@ -5,7 +5,7 @@ Maintainer: dookie <dookie@kali.org>
 Build-Depends: debhelper (>= 8.0.0)
 Standards-Version: 3.9.3
 Homepage: http://www.digininja.org/projects/cewl.php
-Vcs-Git: ssh://git@git.kali.org/packages/cewl.git
+Vcs-Git: git://git.kali.org/packages/cewl.git
 Vcs-Browser: http://git.kali.org/gitweb/?p=packages/cewl.git;a=summary
 
 Package: cewl
