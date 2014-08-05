@@ -2,7 +2,8 @@ cewl (5.0-1kali6) kali-dev; urgency=medium
 
   * Amend vcs-git in debian/control 
   * Update dependencies: debhelper 9, ruby and ruby-zip
-  * Rename script fab in cewlfab
+  * Rename script fab in cewlfab to avoid conflict with fabric
+    which is already providing /usr/bin/fab.
   * Replace depends ruby-zip by ruby-zip-zip
 
  -- Sophie Brun <sophie@freexian.com>  Tue, 05 Aug 2014 11:22:33 +0200
